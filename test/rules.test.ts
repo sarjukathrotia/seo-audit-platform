@@ -112,3 +112,27 @@ describe("On-Page SEO Rule Engine", () => {
     expect(issues[0].code).toBe("IMAGES_MISSING_ALT");
   });
 });
+
+describe("Links & Redirects Rule Engine", () => {
+  it("flags broken external links and redirect chains", async () => {
+    const { checkBrokenExternalLinks, checkRedirectChains } = await import("../lib/rules/links-extra");
+    const crawlMock: any = {
+      pages: [
+        {
+          url: "https://example.com/source",
+          externalLinks: [{ url: "https://dead-partner.com", statusCode: 404 }],
+          internalLinks: [{ url: "https://example.com/dest", hops: 3 }],
+        },
+      ],
+      externalBrokenLinks: [],
+    };
+
+    const extIssues = checkBrokenExternalLinks(crawlMock);
+    expect(extIssues.length).toBe(1);
+    expect(extIssues[0].code).toBe("BROKEN_EXTERNAL_LINK");
+
+    const redirIssues = checkRedirectChains(crawlMock);
+    expect(redirIssues.length).toBe(1);
+    expect(redirIssues[0].code).toBe("REDIRECT_CHAIN");
+  });
+});

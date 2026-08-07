@@ -24,7 +24,7 @@ import {
   checkStructuredData,
   checkReadability,
 } from "./onpage";
-import { checkSecurity, checkAccessibility } from "./security-a11y";
+import { checkBrokenExternalLinks, checkRedirectChains } from "./links-extra";
 
 export function runAllRules(crawlResult: CrawlResult): IssueResult[] {
   const issues: IssueResult[] = [];
@@ -62,8 +62,10 @@ export function runAllRules(crawlResult: CrawlResult): IssueResult[] {
   issues.push(...checkDuplicateMetaDescriptions(pages));
   issues.push(...checkBrokenInternalLinks(pages));
 
-  // 3. Site-wide checks (Robots.txt, Sitemap, Orphan pages, Duplicates)
+  // 3. Site-wide checks (Robots.txt, Sitemap, Orphan pages, Duplicates, External links, Redirect chains)
   issues.push(...checkSiteWideTechnical(crawlResult));
+  issues.push(...checkBrokenExternalLinks(crawlResult));
+  issues.push(...checkRedirectChains(crawlResult));
 
   return issues;
 }
