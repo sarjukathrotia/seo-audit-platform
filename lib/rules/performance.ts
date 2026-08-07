@@ -2,32 +2,37 @@ import { CoreWebVitals, IssueResult, CrawledPageData } from "../types/seo";
 
 export async function checkPerformance(
   targetUrl: string,
+  samplePage?: CrawledPageData,
   apiKey?: string
 ): Promise<{ metrics: CoreWebVitals; issues: IssueResult[] }> {
-  // If API key or public endpoint available, query PageSpeed Insights API
-  if (apiKey) {
+  // Read key from env if not passed explicitly
+  const key = apiKey || process.env.PAGESPEED_API_KEY;
+
+  if (key) {
     try {
-      const endpoint = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(
-        targetUrl
-      )}&key=${apiKey}&strategy=mobile&category=performance&category=accessibility&category=best-practices&category=seo`;
+      const endpoint =
+        `https://www.googleapis.com/pagespeedonline/v5/runPagespeed` +
+        `?url=${encodeURIComponent(targetUrl)}&key=${key}` +
+        `&strategy=mobile&category=performance`;
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
+      const timeout = setTimeout(() => controller.abort(), 30000);
       const res = await fetch(endpoint, { signal: controller.signal });
       clearTimeout(timeout);
 
       if (res.ok) {
         const data = await res.json();
-        const lighthouse = data.lighthouseResult;
-        const audits = lighthouse?.audits || {};
-        const categories = lighthouse?.categories || {};
+        const lh = data.lighthouseResult;
+        const audits = lh?.audits || {};
+        const categories = lh?.categories || {};
 
-        const perfScore = Math.round((categories.performance?.score || 0.8) * 100);
-        const lcp = (audits["largest-contentful-paint"]?.numericValue || 2200) / 1000;
-        const cls = audits["cumulative-layout-shift"]?.numericValue || 0.05;
-        const fcp = (audits["first-contentful-paint"]?.numericValue || 1600) / 1000;
-        const tbt = audits["total-blocking-time"]?.numericValue || 180;
-        const inp = audits["interaction-to-next-paint"]?.numericValue || 150;
+        // Only trust real values; if an audit is missing, treat as unknown (0)
+        const perfScore = Math.round((categories.performance?.score ?? 0) * 100);
+        const lcp = (audits["largest-contentful-paint"]?.numericValue ?? 0) / 1000;
+        const cls = audits["cumulative-layout-shift"]?.numericValue ?? 0;
+        const fcp = (audits["first-contentful-paint"]?.numericValue ?? 0) / 1000;
+        const tbt = audits["total-blocking-time"]?.numericValue ?? 0;
+        const inp = audits["interaction-to-next-paint"]?.numericValue ?? 0;
 
         const opportunities: CoreWebVitals["opportunities"] = [];
         const oppKeys = [
@@ -39,14 +44,13 @@ export async function checkPerformance(
           "uses-text-compression",
           "uses-responsive-images",
         ];
-
-        for (const key of oppKeys) {
-          const audit = audits[key];
-          if (audit && audit.score !== null && audit.score < 0.9) {
+        for (const k of oppKeys) {
+          const a = audits[k];
+          if (a && a.score !== null && a.score < 0.9) {
             opportunities.push({
-              title: audit.title,
-              description: audit.description?.split("[Learn")[0]?.trim() || audit.title,
-              savings: audit.displayValue || undefined,
+              title: a.title,
+              description: a.description?.split("[Learn")[0]?.trim() || a.title,
+              savings: a.displayValue || undefined,
             });
           }
         }
@@ -59,37 +63,37 @@ export async function checkPerformance(
           fcp: parseFloat(fcp.toFixed(2)),
           tbt: Math.round(tbt),
           opportunities,
+          source: "measured",
         };
-
-        const issues = evaluateVitalsIssues(metrics, targetUrl);
-        return { metrics, issues };
+        return { metrics, issues: evaluateVitalsIssues(metrics, targetUrl) };
       }
-    } catch {
-      // Fallback to synthetic performance calculation
+    } catch (err) {
+      console.warn("PageSpeed API failed, using estimate:", err);
     }
   }
 
-  // Realistic Synthetic Lab Measurement Fallback
-  return simulatePerformance(targetUrl);
+  // No key or API failed -> estimate from REAL crawl data of this page
+  return estimatePerformance(targetUrl, samplePage);
 }
 
-export function simulatePerformance(
+// Honest estimate derived from the page's OWN measured response time and assets.
+// Marked source:"estimated" so the UI can label it clearly.
+export function estimatePerformance(
   targetUrl: string,
   samplePage?: CrawledPageData
 ): { metrics: CoreWebVitals; issues: IssueResult[] } {
-  // Derive realistic web vitals from response time, page weight, and images
-  const responseTime = samplePage?.responseTimeMs || 250;
-  const imageCount = samplePage?.images.length || 6;
-  const wordCount = samplePage?.wordCount || 800;
+  const responseTime = samplePage?.responseTimeMs ?? 500;
+  const imageCount = samplePage?.images.length ?? 0;
+  const wordCount = samplePage?.wordCount ?? 500;
 
-  // LCP estimation based on response time and assets
-  const lcp = parseFloat((Math.min(4.8, 1.2 + (responseTime / 1000) * 1.5 + (imageCount > 10 ? 0.8 : 0.2))).toFixed(2));
-  const fcp = parseFloat((Math.min(3.2, 0.8 + (responseTime / 1000) * 1.1)).toFixed(2));
-  const cls = parseFloat((imageCount > 8 ? 0.12 : 0.04).toFixed(3));
-  const tbt = Math.min(650, Math.round(80 + (wordCount / 20) + (imageCount * 12)));
-  const inp = Math.min(450, Math.round(120 + (imageCount * 10)));
+  const lcp = parseFloat(
+    Math.min(6, 0.9 + (responseTime / 1000) * 1.8 + (imageCount > 10 ? 1.0 : imageCount * 0.05)).toFixed(2)
+  );
+  const fcp = parseFloat(Math.min(4, 0.6 + (responseTime / 1000) * 1.3).toFixed(2));
+  const cls = parseFloat((imageCount > 8 ? 0.14 : imageCount > 3 ? 0.06 : 0.02).toFixed(3));
+  const tbt = Math.min(900, Math.round(60 + wordCount / 25 + imageCount * 14));
+  const inp = Math.min(500, Math.round(100 + imageCount * 12));
 
-  // Calculate score (0-100)
   let perfScore = 100;
   if (lcp > 2.5) perfScore -= 18;
   if (lcp > 4.0) perfScore -= 15;
@@ -98,30 +102,20 @@ export function simulatePerformance(
   if (tbt > 200) perfScore -= 12;
   if (tbt > 600) perfScore -= 12;
   if (fcp > 1.8) perfScore -= 8;
-  perfScore = Math.max(35, Math.min(98, perfScore));
+  perfScore = Math.max(20, Math.min(99, perfScore));
 
   const opportunities: CoreWebVitals["opportunities"] = [];
-  if (imageCount > 5) {
+  if (imageCount > 5)
     opportunities.push({
       title: "Serve images in next-gen formats (WebP/AVIF)",
-      description: "Image formats like WebP and AVIF often provide better compression than PNG or JPEG.",
-      savings: "Est. savings: ~150 KB",
+      description: "WebP/AVIF compress better than PNG/JPEG.",
+      savings: `~${imageCount * 25} KB est.`,
     });
-  }
-  if (lcp > 2.5) {
+  if (lcp > 2.5)
     opportunities.push({
-      title: "Eliminate render-blocking resources",
-      description: "Resources are blocking the first paint of your page. Consider delivering critical JS/CSS inline and deferring non-critical scripts.",
-      savings: "Est. savings: 420 ms",
+      title: "Reduce server response time / render-blocking resources",
+      description: "Defer non-critical JS/CSS and speed up the initial response.",
     });
-  }
-  if (tbt > 200) {
-    opportunities.push({
-      title: "Reduce JavaScript execution time",
-      description: "Consider reducing the time spent parsing, compiling and executing JS. You may find delivering smaller JS payloads helps with this.",
-      savings: "Est. savings: 280 ms",
-    });
-  }
 
   const metrics: CoreWebVitals = {
     perfScore,
@@ -131,63 +125,55 @@ export function simulatePerformance(
     fcp,
     tbt,
     opportunities,
+    source: "estimated",
   };
-
-  const issues = evaluateVitalsIssues(metrics, targetUrl);
-  return { metrics, issues };
+  return { metrics, issues: evaluateVitalsIssues(metrics, targetUrl) };
 }
 
-function evaluateVitalsIssues(metrics: CoreWebVitals, url: string): IssueResult[] {
+function evaluateVitalsIssues(m: CoreWebVitals, url: string): IssueResult[] {
   const issues: IssueResult[] = [];
-
-  // LCP check (Good <= 2.5s, Poor > 4.0s)
-  if (metrics.lcp > 4.0) {
+  if (m.lcp > 4.0)
     issues.push({
       category: "performance",
       code: "POOR_LCP",
       severity: "high",
-      title: `Poor LCP (Largest Contentful Paint: ${metrics.lcp}s)`,
-      message: `LCP is ${metrics.lcp}s (target ≤ 2.5s). Main content loads slowly, hurting user retention and mobile search ranking.`,
+      title: `Poor LCP (${m.lcp}s)`,
+      message: `LCP is ${m.lcp}s (target ≤ 2.5s). Main content loads slowly.`,
       pageUrl: url,
-      detail: { lcp: metrics.lcp },
+      detail: { lcp: m.lcp },
     });
-  } else if (metrics.lcp > 2.5) {
+  else if (m.lcp > 2.5)
     issues.push({
       category: "performance",
       code: "NEEDS_WORK_LCP",
       severity: "medium",
-      title: `LCP Needs Improvement (${metrics.lcp}s)`,
-      message: `Largest Contentful Paint is ${metrics.lcp}s, slightly above the 2.5s threshold recommended by Google.`,
+      title: `LCP Needs Improvement (${m.lcp}s)`,
+      message: `LCP is ${m.lcp}s, above the 2.5s target.`,
       pageUrl: url,
-      detail: { lcp: metrics.lcp },
+      detail: { lcp: m.lcp },
     });
-  }
 
-  // CLS check (Good <= 0.1, Poor > 0.25)
-  if (metrics.cls > 0.25) {
+  if (m.cls > 0.25)
     issues.push({
       category: "performance",
       code: "POOR_CLS",
       severity: "high",
-      title: `High Cumulative Layout Shift (${metrics.cls})`,
-      message: `CLS is ${metrics.cls} (target ≤ 0.1). Layout instability causes unexpected shifting of page elements during load.`,
+      title: `High CLS (${m.cls})`,
+      message: `CLS is ${m.cls} (target ≤ 0.1). Layout shifts during load.`,
       pageUrl: url,
-      detail: { cls: metrics.cls },
+      detail: { cls: m.cls },
     });
-  }
 
-  // TBT check (Good <= 200ms, Poor > 600ms)
-  if (metrics.tbt > 600) {
+  if (m.tbt > 600)
     issues.push({
       category: "performance",
       code: "POOR_TBT",
       severity: "high",
-      title: `Excessive Total Blocking Time (${metrics.tbt}ms)`,
-      message: `Main thread is blocked for ${metrics.tbt}ms during page load. Break up long JavaScript tasks.`,
+      title: `Excessive Total Blocking Time (${m.tbt}ms)`,
+      message: `Main thread blocked ${m.tbt}ms. Break up long JS tasks.`,
       pageUrl: url,
-      detail: { tbt: metrics.tbt },
+      detail: { tbt: m.tbt },
     });
-  }
 
   return issues;
 }

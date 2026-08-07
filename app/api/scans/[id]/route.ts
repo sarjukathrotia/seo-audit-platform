@@ -64,6 +64,7 @@ export async function GET(
         fcp: primaryMetric.fcp || 1.4,
         tbt: primaryMetric.tbt || 150,
         opportunities: primaryMetric.opportunities ? JSON.parse(primaryMetric.opportunities) : [],
+        source: process.env.PAGESPEED_API_KEY ? "measured" : "estimated",
       };
     }
 

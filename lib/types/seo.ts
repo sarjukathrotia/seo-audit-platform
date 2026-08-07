@@ -92,6 +92,7 @@ export interface CoreWebVitals {
     description: string;
     savings?: string;
   }[];
+  source?: "measured" | "estimated";
 }
 
 export interface RecommendationItem {

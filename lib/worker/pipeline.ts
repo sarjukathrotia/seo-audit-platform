@@ -89,7 +89,12 @@ export async function runScanPipeline(scanId: string): Promise<void> {
     // 4. Stage: SCORING & PERFORMANCE
     await updateStatus("scoring", "Evaluating Core Web Vitals and calculating SEO Health Scores...");
 
-    const { metrics: perfMetrics, issues: perfIssues } = await checkPerformance(scan.rootUrl);
+    const rootSample =
+      crawlResult.pages.find((p) => p.url === scan.rootUrl) || crawlResult.pages[0];
+    const { metrics: perfMetrics, issues: perfIssues } = await checkPerformance(
+      scan.rootUrl,
+      rootSample
+    );
     const allIssues = [...rawIssues, ...perfIssues];
 
     // Persist page metrics

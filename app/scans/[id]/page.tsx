@@ -71,6 +71,7 @@ interface ScanData {
     fcp: number;
     tbt: number;
     opportunities: Array<{ title: string; description: string; savings?: string }>;
+    source?: "measured" | "estimated";
   } | null;
 }
 
@@ -453,7 +454,7 @@ export default function ScanDetailPage({ params }: { params: Promise<{ id: strin
                   <p className="text-xs text-slate-400">Simulated mobile load metrics evaluated for root landing page</p>
                 </div>
                 <span className="text-xs px-2.5 py-1 rounded-full bg-cyan-500/10 text-cyan-300 font-bold border border-cyan-500/20">
-                  Perf Score: {scan.metrics.perfScore}/100
+                  {scan.metrics.source === "measured" ? "Measured (PageSpeed)" : "Estimated"} · Perf {scan.metrics.perfScore}/100
                 </span>
               </div>
 
