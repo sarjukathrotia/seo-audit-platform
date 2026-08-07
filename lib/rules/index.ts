@@ -25,6 +25,7 @@ import {
   checkReadability,
 } from "./onpage";
 import { checkBrokenExternalLinks, checkRedirectChains } from "./links-extra";
+import { checkSecurity, checkAccessibility } from "./security-a11y";
 
 export function runAllRules(crawlResult: CrawlResult): IssueResult[] {
   const issues: IssueResult[] = [];
