@@ -101,7 +101,7 @@ Return JSON with this exact shape:
 }`;
 
       const response = await client.messages.create({
-        model: "claude-3-5-sonnet-latest",
+        model: "claude-3-7-sonnet-latest",
         max_tokens: 2500,
         temperature: 0.2,
         system: systemPrompt,
@@ -119,8 +119,10 @@ Return JSON with this exact shape:
         }
       }
     } catch (err) {
-      console.warn("AI recommendation Claude call failed, using heuristic engine:", err);
+      console.warn("[SEO Audit AI] Claude API call failed or timed out, falling back to deterministic engine:", err);
     }
+  } else {
+    console.warn("[SEO Audit AI] Notice: ANTHROPIC_API_KEY is not set in environment. Using deterministic heuristic recommendation engine.");
   }
 
   // High quality deterministic fallback matching the exact schema
