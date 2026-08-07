@@ -2,6 +2,7 @@ import { CrawledPageData } from "../types/seo";
 import { fetchUrl } from "./fetcher";
 import { fetchRobotsTxt, fetchSitemap, RobotsResult, SitemapResult } from "./robots-sitemap";
 import { parsePageHtml } from "./html-parser";
+import { renderHtml } from "./renderer";
 
 export interface CrawlOptions {
   rootUrl: string;
@@ -141,14 +142,26 @@ export class WebCrawler {
 
         try {
           const fetchResult = await fetchUrl(item.url, 10000);
+          let html = fetchResult.html;
+          let rendered = false;
+
+          if (this.options.renderJs) {
+            const r = await renderHtml(fetchResult.finalUrl);
+            if (r) {
+              html = r;
+              rendered = true;
+            }
+          }
+
           const parsedPage = parsePageHtml(
-            fetchResult.html,
+            html,
             fetchResult.finalUrl,
             fetchResult.statusCode,
             fetchResult.responseTimeMs,
             item.depth,
             fetchResult.headers
           );
+          parsedPage.rendered = rendered;
 
           if (fetchResult.sslInfo) {
             parsedPage.sslValid = fetchResult.sslInfo.valid;
