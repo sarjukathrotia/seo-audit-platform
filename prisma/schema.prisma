@@ -1,0 +1,137 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Scan {
+  id                 String           @id @default(uuid())
+  userId             String?
+  rootUrl            String
+  status             String           @default("queued") // queued | crawling | analyzing | scoring | generating_report | complete | failed
+  maxPages           Int              @default(25)
+  maxDepth           Int              @default(3)
+  renderJs           Boolean          @default(false)
+  overallScore       Int?
+  technicalScore     Int?
+  onPageScore        Int?
+  performanceScore   Int?
+  securityScore      Int?
+  accessibilityScore Int?
+  summary            String?
+  aiPlan             String?          // JSON stringified AI recommendations and 30/60/90-day plan
+  createdAt          DateTime         @default(now())
+  completedAt        DateTime?
+  error              String?
+
+  pages              Page[]
+  links              Link[]
+  issues             Issue[]
+  recommendations    Recommendation[]
+
+  @@map("scans")
+}
+
+model Page {
+  id               String       @id @default(uuid())
+  scanId           String
+  url              String
+  finalUrl         String?
+  statusCode       Int?
+  responseTimeMs   Int?
+  title            String?
+  metaDescription  String?
+  h1Count          Int?         @default(0)
+  wordCount        Int?         @default(0)
+  canonicalUrl     String?
+  robotsDirectives String?
+  rendered         Boolean      @default(false)
+  depth            Int          @default(0)
+  contentType      String?
+  rawHtmlRef       String?
+  headers          String?      // JSON stringified headers
+  simhash          String?
+
+  scan             Scan         @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  metrics          PageMetric?
+  issues           Issue[]
+  linksFrom        Link[]       @relation("PageLinks")
+
+  @@index([scanId])
+  @@map("pages")
+}
+
+model PageMetric {
+  id            String   @id @default(uuid())
+  pageId        String   @unique
+  perfScore     Int?
+  lcp           Float?   // Largest Contentful Paint (seconds)
+  inp           Int?     // Interaction to Next Paint (ms)
+  cls           Float?   // Cumulative Layout Shift
+  fcp           Float?   // First Contentful Paint (seconds)
+  tbt           Int?     // Total Blocking Time (ms)
+  opportunities String?  // JSON stringified array of opportunities
+
+  page          Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@map("page_metrics")
+}
+
+model Link {
+  id           String   @id @default(uuid())
+  scanId       String
+  fromPageId   String
+  targetUrl    String
+  isInternal   Boolean  @default(true)
+  statusCode   Int?
+  redirectHops Int      @default(0)
+  anchorText   String?
+
+  scan         Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  fromPage     Page     @relation("PageLinks", fields: [fromPageId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+  @@index([fromPageId])
+  @@map("links")
+}
+
+model Issue {
+  id          String   @id @default(uuid())
+  scanId      String
+  pageId      String?
+  category    String   // technical | onpage | performance | security | accessibility
+  code        String   // e.g., MISSING_TITLE, BROKEN_INTERNAL_LINK
+  severity    String   // critical | high | medium | low
+  title       String
+  message     String
+  detail      String?  // JSON stringified detail
+
+  scan        Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  page        Page?    @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+  @@index([category])
+  @@index([severity])
+  @@map("issues")
+}
+
+model Recommendation {
+  id                String   @id @default(uuid())
+  scanId            String
+  issueCode         String?
+  title             String
+  problem           String
+  whyItMatters      String
+  action            String
+  priority          String   // high | medium | low
+  planBucket        String   // 30 | 60 | 90
+  affectedPageCount Int      @default(1)
+
+  scan              Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+  @@map("recommendations")
+}
