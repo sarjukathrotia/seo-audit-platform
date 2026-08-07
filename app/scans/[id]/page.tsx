@@ -280,6 +280,13 @@ export default function ScanDetailPage({ params }: { params: Promise<{ id: strin
 
         <div className="flex items-center gap-3">
           <a
+            href={`/api/scans/${scan.id}/export`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold transition-colors"
+          >
+            <FileText className="w-4 h-4 text-emerald-200" />
+            Download Excel (.xlsx)
+          </a>
+          <a
             href={`/api/scans/${scan.id}/report`}
             target="_blank"
             rel="noreferrer"
