@@ -287,7 +287,7 @@ export default function ScanDetailPage({ params }: { params: Promise<{ id: strin
             Download Excel (.xlsx)
           </a>
           <a
-            href={`/api/scans/${scan.id}/report`}
+            href={`/api/scans/${scan.id}/report/pdf`}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold border border-slate-700 transition-colors"
