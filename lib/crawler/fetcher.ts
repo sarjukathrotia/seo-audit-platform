@@ -143,7 +143,8 @@ export function inspectSsl(targetUrl: string): Promise<FetchResult["sslInfo"]> {
             const validTo = new Date(cert.valid_to);
             const now = new Date();
             const daysRemaining = Math.max(0, Math.floor((validTo.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
-            const issuer = cert.issuer ? (cert.issuer.O || cert.issuer.CN) : "Unknown";
+            const issuerRaw = cert.issuer ? (cert.issuer.O || cert.issuer.CN) : "Unknown";
+            const issuer = Array.isArray(issuerRaw) ? issuerRaw.join(", ") : issuerRaw || "Unknown";
             const protocol = socket.getProtocol() || undefined;
 
             socket.destroy();

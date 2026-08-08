@@ -22,7 +22,7 @@ export async function GET(
   });
   try {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
+    await page.setContent(html, { waitUntil: "domcontentloaded" });
     const pdf = await page.pdf({ format: "A4", printBackground: true, margin: { top: "16px", bottom: "16px", left: "16px", right: "16px" } });
     return new Response(pdf as any, {
       headers: {

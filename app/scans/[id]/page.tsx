@@ -20,6 +20,8 @@ import {
   Filter,
   Sparkles,
   RefreshCw,
+  Copy,
+  Check,
 } from "lucide-react";
 
 interface ScanData {
@@ -38,13 +40,19 @@ interface ScanData {
   summary: string | null;
   aiPlan: {
     executive_summary: string;
+    detected_platform?: string;
     prioritized_recommendations: Array<{
       title: string;
       problem: string;
       why_it_matters: string;
       action: string;
       priority: string;
+      impact?: string;
+      effort?: string;
       affected_page_count: number;
+      how_to_fix?: string[];
+      code_snippet?: { language: string; code: string; filename?: string; description?: string };
+      estimated_result?: string;
     }>;
     action_plan: {
       day_30: string[];
@@ -117,6 +125,8 @@ export default function ScanDetailPage({ params }: { params: Promise<{ id: strin
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedSnippetIndex, setCopiedSnippetIndex] = useState<number | null>(null);
   const [reScanning, setReScanning] = useState(false);
+  const [activePlanTab, setActivePlanTab] = useState<"30" | "60" | "90">("30");
+  const [gscData, setGscData] = useState<any>(null);
 
   const copyShareLink = () => {
     const origin = window.location.origin;
@@ -362,7 +372,7 @@ export default function ScanDetailPage({ params }: { params: Promise<{ id: strin
             disabled={reScanning}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-800 transition-all"
           >
-            <RotateCw className={`w-3.5 h-3.5 text-amber-400 ${reScanning ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${reScanning ? "animate-spin" : ""}`} />
             Re-Scan
           </button>
           <a
@@ -1017,6 +1027,10 @@ export default function ScanDetailPage({ params }: { params: Promise<{ id: strin
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
       {/* White-Label Branding Modal */}
       {brandingModalOpen && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
