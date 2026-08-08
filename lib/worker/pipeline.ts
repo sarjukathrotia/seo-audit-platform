@@ -84,7 +84,7 @@ export async function runScanPipeline(scanId: string): Promise<void> {
     // 3. Stage: ANALYZING (Run rule engine)
     await updateStatus("analyzing", `Executing technical, on-page, security and accessibility rules on ${crawlResult.pages.length} pages...`);
 
-    const rawIssues = runAllRules(crawlResult);
+    const { issues: rawIssues, detectedPlatform } = runAllRules(crawlResult);
 
     // 4. Stage: SCORING & PERFORMANCE
     await updateStatus("scoring", "Evaluating Core Web Vitals and calculating SEO Health Scores...");
@@ -142,7 +142,9 @@ export async function runScanPipeline(scanId: string): Promise<void> {
       scores,
       allIssues,
       perfMetrics,
-      null // search console data
+      null, // search console data
+      undefined,
+      detectedPlatform as any
     );
 
     // Persist recommendations

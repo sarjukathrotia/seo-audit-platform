@@ -29,11 +29,15 @@ export async function GET(
     wb.creator = "SEO Audit Platform";
     wb.created = new Date();
 
+    const agencyName = req.nextUrl.searchParams.get("agency") || "SEO Audit Platform";
+    const clientName = req.nextUrl.searchParams.get("client") || "";
+
     // ---- Sheet 1: Summary ----
     const s = wb.addWorksheet("Summary");
     s.columns = [{ width: 28 }, { width: 60 }];
-    s.addRow(["SEO Audit Report", ""]).font = { bold: true, size: 16 };
+    s.addRow([`${agencyName} - SEO Audit Deliverable`, ""]).font = { bold: true, size: 16 };
     s.addRow(["Website", scan.rootUrl]);
+    if (clientName) s.addRow(["Client", clientName]);
     s.addRow(["Date", new Date(scan.createdAt).toLocaleString()]);
     s.addRow(["Pages Crawled", scan.pages.length]);
     s.addRow([]);

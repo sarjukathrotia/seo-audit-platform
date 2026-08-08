@@ -95,18 +95,41 @@ export interface CoreWebVitals {
   source?: "measured" | "estimated";
 }
 
+export type CMSPlatform =
+  | "shopify"
+  | "wordpress"
+  | "woocommerce"
+  | "webflow"
+  | "wix"
+  | "squarespace"
+  | "nextjs"
+  | "custom";
+
+export interface CodeSnippet {
+  language: string;
+  code: string;
+  filename?: string;
+  description?: string;
+}
+
 export interface RecommendationItem {
   title: string;
   problem: string;
   why_it_matters: string;
   action: string;
   priority: "high" | "medium" | "low";
+  impact?: "high" | "medium" | "low";
+  effort?: "quick_win" | "moderate" | "complex";
   affected_page_count: number;
   issue_code?: string;
+  how_to_fix?: string[];
+  code_snippet?: CodeSnippet;
+  estimated_result?: string;
 }
 
 export interface AIRecommendationResponse {
   executive_summary: string;
+  detected_platform?: CMSPlatform;
   prioritized_recommendations: RecommendationItem[];
   action_plan: {
     day_30: string[];
@@ -130,6 +153,7 @@ export interface ScanSummaryData {
   accessibilityScore: number | null;
   summary: string | null;
   aiPlan: AIRecommendationResponse | null;
+  detectedPlatform?: CMSPlatform;
   createdAt: string;
   completedAt: string | null;
   error: string | null;
@@ -143,3 +167,4 @@ export interface ScanSummaryData {
   };
   metrics?: CoreWebVitals | null;
 }
+

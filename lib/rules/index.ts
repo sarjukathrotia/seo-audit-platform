@@ -26,10 +26,16 @@ import {
 } from "./onpage";
 import { checkBrokenExternalLinks, checkRedirectChains } from "./links-extra";
 import { checkSecurity, checkAccessibility } from "./security-a11y";
+import { detectPlatform } from "../crawler/platform-detector";
+import { checkPlatformSpecific } from "./niche-rules";
 
-export function runAllRules(crawlResult: CrawlResult): IssueResult[] {
+export function runAllRules(crawlResult: CrawlResult): { issues: IssueResult[]; detectedPlatform: string } {
   const issues: IssueResult[] = [];
   const { pages, rootUrl } = crawlResult;
+
+  // 0. Auto-detect CMS platform
+  const platformResult = detectPlatform(pages);
+  const detectedPlatform = platformResult.platform;
 
   // 1. Per-page deterministic checks
   for (const page of pages) {
@@ -68,5 +74,8 @@ export function runAllRules(crawlResult: CrawlResult): IssueResult[] {
   issues.push(...checkBrokenExternalLinks(crawlResult));
   issues.push(...checkRedirectChains(crawlResult));
 
-  return issues;
+  // 4. Platform-specific niche checks (Shopify, WordPress, etc.)
+  issues.push(...checkPlatformSpecific(crawlResult, detectedPlatform as any));
+
+  return { issues, detectedPlatform };
 }

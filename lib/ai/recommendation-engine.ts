@@ -2,8 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   AIRecommendationResponse,
   CategoryScores,
+  CMSPlatform,
+  CodeSnippet,
   CoreWebVitals,
   IssueResult,
+  RecommendationItem,
 } from "../types/seo";
 
 export async function generateAiRecommendations(
@@ -12,7 +15,8 @@ export async function generateAiRecommendations(
   issues: IssueResult[],
   perfMetrics?: CoreWebVitals | null,
   searchConsoleData: any = null,
-  apiKey?: string
+  apiKey?: string,
+  platform: CMSPlatform = "custom"
 ): Promise<AIRecommendationResponse> {
   const anthropicKey = apiKey || process.env.ANTHROPIC_API_KEY;
 
@@ -50,39 +54,39 @@ export async function generateAiRecommendations(
       const systemPrompt = `You are an expert technical SEO consultant. You will receive structured JSON
 describing the findings of an automated SEO audit for one website: detected
 issues (with category, code, severity, and affected pages), performance metrics,
-and — when available — Google Search Console data.
+detected CMS/platform (${platform}), and — when available — Google Search Console data.
 
 Your job:
 1. Explain each significant issue in plain language a non-expert client can act on.
-2. Prioritize fixes by impact-vs-effort, favoring issues that affect many pages
-   or high-traffic pages (use Search Console data when present).
-3. Produce a phased action plan grouped into 30-day, 60-day, and 90-day buckets.
+2. Provide two clear rating badges for each recommendation:
+   - "impact": "high" | "medium" | "low"
+   - "effort": "quick_win" | "moderate" | "complex"
+3. Provide step-by-step platform-specific instructions in "how_to_fix" (e.g. specific to ${platform} admin navigation).
+4. Provide copy-paste code snippets in "code_snippet" where applicable (e.g., Schema JSON-LD, robots.txt, canonical tags).
+5. State an "estimated_result" (e.g. "Eliminates duplicate content penalty and lifts collection ranking").
+6. Group phased action plan into 30-day, 60-day, and 90-day buckets.
 
 Rules:
-- Be concrete and specific to the data provided. Do not invent issues that are
-  not in the input.
-- For each recommendation, state: the problem, why it matters for SEO, and the
-  exact action to take.
-- Keep language professional and client-ready. No hype, no filler.
-- Output valid JSON only, matching the schema given in the user message. No
-  markdown, no commentary outside the JSON.`;
+- Output valid JSON only matching the schema given. No markdown code blocks, no commentary outside JSON.`;
 
       const userMessage = `Website: ${rootUrl}
+Platform: ${platform}
 Overall score: ${scores.overall}
 Category scores: ${JSON.stringify(scores, null, 2)}
 
-Issues (grouped by code, with counts and example pages):
+Issues:
 ${JSON.stringify(groupedIssues, null, 2)}
 
-Performance summary (homepage + sampled pages):
+Performance summary:
 ${JSON.stringify(perfMetrics || {}, null, 2)}
 
-Search Console data (may be null):
+Search Console data:
 ${JSON.stringify(searchConsoleData, null, 2)}
 
 Return JSON with this exact shape:
 {
   "executive_summary": "string, 3-5 sentences",
+  "detected_platform": "${platform}",
   "prioritized_recommendations": [
     {
       "title": "string",
@@ -90,7 +94,17 @@ Return JSON with this exact shape:
       "why_it_matters": "string",
       "action": "string",
       "priority": "high|medium|low",
-      "affected_page_count": number
+      "impact": "high|medium|low",
+      "effort": "quick_win|moderate|complex",
+      "affected_page_count": number,
+      "how_to_fix": ["Step 1...", "Step 2..."],
+      "code_snippet": {
+        "language": "html|json|txt",
+        "code": "string",
+        "filename": "optional filename",
+        "description": "optional brief description"
+      },
+      "estimated_result": "string"
     }
   ],
   "action_plan": {
@@ -102,7 +116,7 @@ Return JSON with this exact shape:
 
       const response = await client.messages.create({
         model: "claude-3-7-sonnet-latest",
-        max_tokens: 2500,
+        max_tokens: 3000,
         temperature: 0.2,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
@@ -111,7 +125,6 @@ Return JSON with this exact shape:
       const textBlock = response.content.find((b) => b.type === "text");
       if (textBlock && "text" in textBlock) {
         let rawJson = textBlock.text.trim();
-        // Defensive parsing: strip code fences if present
         rawJson = rawJson.replace(/^```json\s*/i, "").replace(/^```\s*/, "").replace(/```$/, "").trim();
         const parsed = JSON.parse(rawJson);
         if (parsed.executive_summary && parsed.prioritized_recommendations && parsed.action_plan) {
@@ -119,87 +132,187 @@ Return JSON with this exact shape:
         }
       }
     } catch (err) {
-      console.warn("[SEO Audit AI] Claude API call failed or timed out, falling back to deterministic engine:", err);
+      console.warn("[SEO Audit AI] Claude API call failed, using deterministic engine:", err);
     }
   } else {
     console.warn("[SEO Audit AI] Notice: ANTHROPIC_API_KEY is not set in environment. Using deterministic heuristic recommendation engine.");
   }
 
-  // High quality deterministic fallback matching the exact schema
-  return generateDeterministicRecommendations(rootUrl, scores, groupedIssues, perfMetrics);
+  // High quality deterministic fallback matching the exact schema with platform recipes & code snippets
+  return generateDeterministicRecommendations(rootUrl, scores, groupedIssues, perfMetrics, platform);
 }
 
 export function generateDeterministicRecommendations(
   rootUrl: string,
   scores: CategoryScores,
   groupedIssues: Array<{ code: string; title: string; category: string; severity: string; count: number; samplePages: string[] }>,
-  perfMetrics?: CoreWebVitals | null
+  perfMetrics?: CoreWebVitals | null,
+  platform: CMSPlatform = "custom"
 ): AIRecommendationResponse {
-  const domain = new URL(rootUrl).hostname;
+  const domain = (() => {
+    try {
+      return new URL(rootUrl).hostname;
+    } catch {
+      return "website";
+    }
+  })();
+
   const criticalCount = groupedIssues.filter((i) => i.severity === "critical").length;
   const highCount = groupedIssues.filter((i) => i.severity === "high").length;
 
-  const executive_summary = `Automated technical SEO audit for ${domain} identified an overall SEO Health Score of ${scores.overall}/100 (Grade ${scores.grade}). The crawl uncovered ${criticalCount} critical blocker(s) and ${highCount} high-priority optimization opportunities across Technical, On-Page, and Performance categories. Immediate remediation of broken internal paths, missing metadata, and Core Web Vitals bottlenecks will strengthen search crawl efficiency, indexation, and user conversion.`;
+  const executive_summary = `Automated technical SEO audit for ${domain} (${platform.toUpperCase()}) identified an overall SEO Health Score of ${scores.overall}/100 (Grade ${scores.grade}). The crawl identified ${criticalCount} critical blocker(s) and ${highCount} high-leverage optimization opportunities. Implementing the prioritized quick wins below will immediately eliminate search crawl waste, consolidate link equity, and improve search visibility.`;
 
-  const prioritized_recommendations: AIRecommendationResponse["prioritized_recommendations"] = [];
+  const prioritized_recommendations: RecommendationItem[] = [];
   const day_30: string[] = [];
   const day_60: string[] = [];
   const day_90: string[] = [];
 
   for (const item of groupedIssues) {
     let problem = `Detected ${item.count} instance(s) of ${item.title.toLowerCase()}.`;
-    let why_it_matters = "Search engines penalize inconsistent signals and broken crawl paths, reducing organic visibility.";
+    let why_it_matters = "Inconsistent technical signals and missing tags dilute search rankings.";
     let action = `Resolve ${item.title} across all affected pages.`;
-    let priority: "high" | "medium" | "low" = item.severity === "critical" || item.severity === "high" ? "high" : item.severity === "medium" ? "medium" : "low";
+    let priority: "high" | "medium" | "low" = item.severity === "critical" || item.severity === "high" ? "high" : "medium";
+    let impact: "high" | "medium" | "low" = priority;
+    let effort: "quick_win" | "moderate" | "complex" = "moderate";
+    let how_to_fix: string[] = [];
+    let code_snippet: CodeSnippet | undefined = undefined;
+    let estimated_result = "Improves organic crawl efficiency and SERP presentation.";
 
-    if (item.code === "BROKEN_INTERNAL_LINK") {
-      problem = `${item.count} internal link(s) return 4xx/5xx HTTP status codes.`;
-      why_it_matters = "Broken links leak PageRank equity, waste crawl budget, and degrade user experience.";
+    if (item.code === "BROKEN_INTERNAL_LINK" || item.code === "PAGE_NOT_FOUND_4XX") {
+      problem = `${item.count} internal link(s) return 404 or 500 status codes.`;
+      why_it_matters = "Broken links leak PageRank equity, waste Googlebot crawl budget, and degrade user experience.";
       action = "Update outdated href destinations or implement 301 redirects to active equivalent URLs.";
+      impact = "high";
+      effort = "quick_win";
+      how_to_fix = [
+        "Open your site's redirect manager or web server configuration.",
+        "Map each dead URL to its relevant active category or parent page.",
+        "Update the internal link anchors across your navigation and footer templates.",
+      ];
+      code_snippet = {
+        language: "apache",
+        code: `# 301 Permanent Redirects\nRedirect 301 /old-broken-path /new-active-destination`,
+        filename: ".htaccess / redirect rules",
+        description: "Standard 301 Permanent Redirect rule",
+      };
+      estimated_result = "Restores crawl equity and eliminates dead-end 404 crawl errors.";
       day_30.push(`Fix ${item.count} broken internal links to stop PageRank leakage`);
     } else if (item.code === "MISSING_TITLE" || item.code === "DUPLICATE_TITLE") {
-      problem = `${item.count} page(s) have missing or duplicate title tags.`;
-      why_it_matters = "The title tag is the single strongest on-page ranking signal for thematic relevance.";
-      action = "Write unique, keyword-rich title tags (30–60 characters) matching user intent for every indexable URL.";
-      day_30.push(`Write unique, optimized <title> tags for ${item.count} affected pages`);
-    } else if (item.code === "MISSING_META_DESCRIPTION" || item.code === "DUPLICATE_META_DESCRIPTION") {
-      problem = `${item.count} page(s) lack customized meta descriptions.`;
-      why_it_matters = "Meta descriptions directly influence search result Click-Through Rates (CTR).";
-      action = "Craft concise 70–160 character meta descriptions with clear value propositions and call-to-actions.";
-      day_60.push(`Implement tailored meta descriptions across ${item.count} URLs to boost SERP CTR`);
-    } else if (item.code === "MISSING_H1" || item.code === "MULTIPLE_H1") {
-      problem = `${item.count} page(s) violate primary H1 heading hierarchy guidelines.`;
-      why_it_matters = "A clear single H1 establishes page topical authority for search bots and assistive tech.";
-      action = "Restructure HTML templates to render exactly one descriptive H1 tag per page.";
-      day_30.push(`Ensure exactly one semantic H1 tag per template`);
-    } else if (item.code === "IMAGES_MISSING_ALT") {
-      problem = `${item.count} page(s) contain images without alt attributes.`;
-      why_it_matters = "Alt text is required for Google Image Search indexing and WCAG accessibility standards.";
-      action = "Add concise, descriptive alt tags to all substantive editorial and product images.";
-      day_60.push(`Add descriptive alt attributes across all discovered images`);
-    } else if (item.code === "THIN_CONTENT") {
-      problem = `${item.count} content page(s) have fewer than 300 words of body copy.`;
-      why_it_matters = "Google's helpful content algorithms deprioritize thin or superficial pages.";
-      action = "Expand substantive depth, add FAQs, or consolidate related thin pages into topic pillars.";
-      day_60.push(`Expand or consolidate thin content pages (<300 words)`);
-    } else if (item.code === "MISSING_STRUCTURED_DATA") {
-      problem = `${item.count} key landing page(s) lack Schema.org JSON-LD structured data.`;
-      why_it_matters = "Rich results and knowledge graph eligibility require valid structured schema markup.";
-      action = "Implement Organization, WebSite, BreadcrumbList, and Article/Product JSON-LD schema.";
-      day_90.push(`Deploy Schema.org JSON-LD structured data on core templates`);
-    } else if (item.code === "ROBOTS_TXT_MISSING" || item.code === "SITEMAP_MISSING_OR_EMPTY") {
-      problem = "Robots.txt or XML Sitemap is missing or misconfigured.";
-      why_it_matters = "Search crawlers require standard discovery entry points to allocate crawl budget efficiently.";
-      action = "Generate a dynamic XML sitemap and configure standard robots.txt allow rules.";
-      day_30.push("Publish valid /robots.txt and dynamic /sitemap.xml");
+      problem = `${item.count} page(s) lack a unique <title> tag.`;
+      why_it_matters = "The title tag is the primary on-page signal used by Google and searchers to determine page relevance.";
+      action = "Add a unique, keyword-rich title tag under 60 characters to each flagged page.";
+      impact = "high";
+      effort = "quick_win";
+      how_to_fix =
+        platform === "shopify"
+          ? [
+              "Log in to Shopify Admin -> Online Store -> Pages (or Products).",
+              "Click on the affected page and scroll to 'Search engine listing'.",
+              "Click 'Edit website SEO' and enter a descriptive page title (50-60 characters).",
+            ]
+          : platform === "wordpress"
+          ? [
+              "Open the WordPress post/page editor.",
+              "Scroll down to Yoast SEO or Rank Math panel.",
+              "Enter a focused SEO title containing your primary keyword.",
+            ]
+          : [
+              "Open the HTML document for each page.",
+              "Insert a `<title>Primary Keyword - Brand Name</title>` inside the `<head>` section.",
+            ];
+      code_snippet = {
+        language: "html",
+        code: `<title>Primary Keyword - Brand Name</title>`,
+        description: "Optimized HTML <title> tag",
+      };
+      estimated_result = "Improves organic click-through rates (CTR) and primary keyword rankings.";
+      day_30.push(`Add unique, descriptive <title> tags to ${item.count} page(s)`);
+    } else if (item.code === "MISSING_META_DESCRIPTION") {
+      problem = `${item.count} page(s) are missing a meta description.`;
+      why_it_matters = "Without a meta description, search engines auto-generate snippet snippets from random body text, depressing CTR.";
+      action = "Write compelling meta descriptions (120–158 characters) with a clear value proposition.";
+      impact = "medium";
+      effort = "quick_win";
+      how_to_fix =
+        platform === "shopify"
+          ? [
+              "In Shopify Admin, edit the page/product search engine listing.",
+              "Provide a 140-155 character description with a call to action.",
+            ]
+          : [
+              "Add `<meta name=\"description\" content=\"...\">` to the `<head>` tag of each page.",
+            ];
+      code_snippet = {
+        language: "html",
+        code: `<meta name="description" content="Discover our complete range of lab reagents and industrial supplies with fast shipping and ISO certified quality.">`,
+        description: "Optimized Meta Description Tag",
+      };
+      estimated_result = "Increases search result click-through rates by up to 15%.";
+      day_30.push(`Write compelling meta descriptions for ${item.count} page(s)`);
+    } else if (item.code === "MISSING_STRUCTURED_DATA" || item.code === "MISSING_PRODUCT_SCHEMA") {
+      problem = `${item.count} page(s) lack Schema.org structured data.`;
+      why_it_matters = "Structured data unlocks Google rich snippets (star ratings, prices, availability, search breadcrumbs).";
+      action = "Inject JSON-LD Schema markup into page headers.";
+      impact = "high";
+      effort = "moderate";
+      how_to_fix = [
+        "Generate JSON-LD structured data for the entity type (Organization, Product, WebSite).",
+        "Embed the `<script type=\"application/ld+json\">` block directly into the page `<head>`.",
+        "Validate the output using Google's Rich Results Test tool.",
+      ];
+      code_snippet = {
+        language: "json",
+        code: `<script type="application/ld+json">\n{\n  "@context": "https://schema.org/",\n  "@type": "Product",\n  "name": "Product Name",\n  "image": "https://${domain}/product.jpg",\n  "description": "Product description",\n  "offers": {\n    "@type": "Offer",\n    "priceCurrency": "USD",\n    "price": "27.62",\n    "availability": "https://schema.org/InStock"\n  }\n}\n</script>`,
+        filename: "product-schema.jsonld",
+        description: "Google Rich Snippets Product JSON-LD",
+      };
+      estimated_result = "Enables rich search snippets with star ratings, pricing, and stock availability.";
+      day_60.push(`Implement JSON-LD Schema structured data across ${item.count} pages`);
+    } else if (item.code === "SHOPIFY_COLLECTION_PRODUCT_DUPLICATE") {
+      problem = `Shopify is linking to nested /collections/*/products/* URLs instead of canonical /products/* paths.`;
+      why_it_matters = "Causes duplicate internal link equity dilution and forces Googlebot to crawl multiple URLs for the same product.";
+      action = "Update Shopify Liquid collection templates to reference the root `product.url` instead of `product.url_within_collection`.";
+      impact = "high";
+      effort = "quick_win";
+      how_to_fix = [
+        "In Shopify Admin -> Online Store -> Themes -> Edit Code.",
+        "Open `snippets/product-card.liquid` (or `product-grid-item.liquid`).",
+        "Replace `{{ product.url | within: collection }}` with `{{ product.url }}`.",
+        "Save and re-scan.",
+      ];
+      code_snippet = {
+        language: "liquid",
+        code: `{%- comment -%} Change collection nested URL to canonical root {%- endcomment -%}\n<a href="{{ product.url }}">\n  {{ product.title }}\n</a>`,
+        filename: "snippets/product-card.liquid",
+        description: "Shopify Liquid Canonical URL Fix",
+      };
+      estimated_result = "Consolidates all product link equity into single canonical URLs and eliminates crawl waste.";
+      day_30.push("Update Shopify Liquid theme to reference canonical /products/* URLs");
+    } else if (item.code === "POOR_LCP" || item.code === "NEEDS_WORK_LCP") {
+      problem = `Largest Contentful Paint (${perfMetrics?.lcp || 3.8}s) exceeds the Google 2.5s threshold.`;
+      why_it_matters = "Core Web Vitals are an active Google ranking factor and directly influence conversion rate.";
+      action = "Preload hero images, defer render-blocking JavaScript, and convert images to WebP/AVIF.";
+      impact = "high";
+      effort = "moderate";
+      how_to_fix = [
+        "Identify the LCP hero image and add `<link rel=\"preload\" as=\"image\">` in `<head>`.",
+        "Ensure image has explicit `width` and `height` attributes to prevent layout shift.",
+        "Defer non-critical third-party analytics and chat widgets.",
+      ];
+      code_snippet = {
+        language: "html",
+        code: `<link rel="preload" fetchpriority="high" as="image" href="/hero-banner.webp" type="image/webp">`,
+        description: "High-Priority LCP Hero Image Preload",
+      };
+      estimated_result = "Lifts LCP to <2.5s and passes Google Core Web Vitals assessment.";
+      day_60.push("Optimize hero image loading and defer render-blocking scripts");
     } else {
-      if (item.severity === "critical" || item.severity === "high") {
-        day_30.push(`Remediate ${item.title} on affected pages`);
-      } else if (item.severity === "medium") {
-        day_60.push(`Optimize ${item.title}`);
-      } else {
-        day_90.push(`Refine ${item.title}`);
-      }
+      how_to_fix = [
+        `Review the ${item.count} affected URLs in the Issues table.`,
+        "Implement necessary content and tag optimizations in your CMS editor.",
+        "Re-scan the website to verify resolution.",
+      ];
+      day_90.push(`Resolve ${item.title}`);
     }
 
     prioritized_recommendations.push({
@@ -208,50 +321,31 @@ export function generateDeterministicRecommendations(
       why_it_matters,
       action,
       priority,
+      impact,
+      effort,
       affected_page_count: item.count,
       issue_code: item.code,
+      how_to_fix,
+      code_snippet,
+      estimated_result,
     });
   }
 
-  // Performance recommendations
-  if (perfMetrics) {
-    if (perfMetrics.lcp > 2.5) {
-      prioritized_recommendations.push({
-        title: "Optimize Largest Contentful Paint (LCP)",
-        problem: `LCP is currently ${perfMetrics.lcp}s (target ≤ 2.5s).`,
-        why_it_matters: "LCP is a core Google ranking factor and directly impacts bounce rate on mobile.",
-        action: "Compress hero imagery with WebP/AVIF, preload critical assets, and defer non-essential JavaScript.",
-        priority: "high",
-        affected_page_count: 1,
-      });
-      day_30.push("Optimize hero images and server response time to bring LCP under 2.5s");
-    }
-
-    if (perfMetrics.cls > 0.1) {
-      prioritized_recommendations.push({
-        title: "Stabilize Cumulative Layout Shift (CLS)",
-        problem: `CLS score is ${perfMetrics.cls} (target ≤ 0.1).`,
-        why_it_matters: "Visual shifts degrade mobile usability and user interaction scores.",
-        action: "Set explicit width and height attributes on all images and ad containers.",
-        priority: "medium",
-        affected_page_count: 1,
-      });
-      day_60.push("Add explicit dimension attributes to prevent layout shifts (CLS)");
-    }
-  }
-
-  // Fill in default plan items if sparse
-  if (day_30.length === 0) day_30.push("Audit and fix critical 4xx/5xx crawl errors", "Verify robots.txt and sitemap submission in Search Console");
-  if (day_60.length === 0) day_60.push("Optimize title tags and meta descriptions for key target queries", "Improve page load speed and Core Web Vitals metrics");
-  if (day_90.length === 0) day_90.push("Deploy advanced Schema.org structured data", "Build topic clusters and strengthen internal contextual linking");
+  // Sort quick wins (High Impact + Quick Win) to the very top!
+  prioritized_recommendations.sort((a, b) => {
+    const isQuickWinA = a.effort === "quick_win" && a.impact === "high" ? 1 : 0;
+    const isQuickWinB = b.effort === "quick_win" && b.impact === "high" ? 1 : 0;
+    return isQuickWinB - isQuickWinA;
+  });
 
   return {
     executive_summary,
+    detected_platform: platform,
     prioritized_recommendations: prioritized_recommendations.slice(0, 10),
     action_plan: {
-      day_30: Array.from(new Set(day_30)).slice(0, 5),
-      day_60: Array.from(new Set(day_60)).slice(0, 5),
-      day_90: Array.from(new Set(day_90)).slice(0, 5),
+      day_30: Array.from(new Set(day_30)).slice(0, 6),
+      day_60: Array.from(new Set(day_60)).slice(0, 6),
+      day_90: Array.from(new Set(day_90)).slice(0, 6),
     },
   };
 }
